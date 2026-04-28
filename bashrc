@@ -101,6 +101,3 @@ if ! shopt -oq posix; then
     . /etc/bash_completion
   fi
 fi
-
-export SHELL="/usr/bin/bash"
-export PATH="/home/coder/.asdf/shims:/home/coder/.bun/bin:$PATH"

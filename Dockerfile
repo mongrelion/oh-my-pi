@@ -5,6 +5,8 @@ FROM debian:13-slim
 ARG ASDF_VERSION=0.18.1
 ARG RUBY_VERSION=3.4.9
 ARG PYTHON_VERSION=3.14.4
+# Check https://developer.android.com/studio#command-line-tools-only for newer versions
+ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 
 # Install dependencies
 RUN apt-get update && \
@@ -14,20 +16,35 @@ RUN apt-get update && \
     bison \
     build-essential \
     ca-certificates \
+    clang \
+    cmake \
+    chromium \
     curl \
+    ddgr \
+    default-jdk-headless \
+    dnsutils \
     fd-find \
+    ffmpeg \
     git \
+    hugo \
+    imagemagick \
     jq \
     libbz2-dev \
     libffi-dev \
     libgmp-dev \
+    libgtk-3-dev \
     liblzma-dev \
     libreadline-dev \
     libsqlite3-dev \
     libssl-dev \
     libyaml-dev \
     make \
+    mesa-utils \
+    netcat-openbsd \
+    ninja-build \
+    pkg-config \
     ripgrep \
+    ssh \
     unzip \
     zlib1g-dev && \
     ln -s /usr/bin/fdfind /usr/bin/fd && \
@@ -42,10 +59,13 @@ RUN cd /tmp && \
     mv asdf /usr/bin
 
 # Create non-root user
-RUN useradd -m coder
+RUN useradd -s /usr/bin/bash -m coder
 
 USER coder
 WORKDIR /home/coder
+
+RUN mkdir /home/coder/.config && \
+    mkdir /home/coder/.agents
 
 # This could be written a a single RUN command but should any of the utilities fail to install, that step would have to be run again, reinstalling everything.
 # By splitting the installation into multiple steps, if one fails, only that step needs to be rerun.
@@ -68,20 +88,55 @@ RUN asdf plugin add golang && \
     asdf install golang
 
 RUN asdf plugin add ruby && \
-     asdf set ruby ${RUBY_VERSION} && \
-     asdf install ruby
+    asdf set ruby ${RUBY_VERSION} && \
+    asdf install ruby
 
-ENV PATH="/home/coder/.asdf/shims:${PATH}"
-ENV SHELL="/bin/bash"
+RUN asdf plugin add flutter && \
+    asdf set flutter latest && \
+    asdf install flutter
 
-RUN bun install -g @oh-my-pi/pi-coding-agent
+ENV SHELL="/usr/bin/bash"
 
-RUN bun install -g @mariozechner/pi-coding-agent
+# Android SDK — installed manually to get a clean `flutter doctor` without Android Studio.
+# sdkmanager requires Java; default-jdk-headless is installed above.
+# ANDROID_HOME must be set before the RUN steps that use sdkmanager.
+ENV ANDROID_HOME=/home/coder/android-sdk
+ENV ANDROID_SDK_ROOT=/home/coder/android-sdk
+ENV JAVA_HOME=/usr/lib/jvm/default-java
+ENV HOME=/home/coder
+ENV BUNDLE_PATH=/home/coder/.bundle
+ENV PATH="${HOME}/.asdf/shims:${HOME}/.bun/bin:${PATH}:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools"
 
-RUN bun install -g opencode-ai
+# 1. Download cmdline-tools and place them where the SDK manager expects them.
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools && \
+    curl -fsSL \
+        "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+        -o /tmp/cmdline-tools.zip && \
+    unzip -q /tmp/cmdline-tools.zip -d /tmp/android-cmdline-tools && \
+    mv /tmp/android-cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest && \
+    rm -rf /tmp/cmdline-tools.zip /tmp/android-cmdline-tools
 
-COPY bashrc /home/coder/.bashrc
+# 2. Accept all SDK licences and install the required components.
+RUN yes | sdkmanager --licenses && \
+    sdkmanager \
+        "platform-tools" \
+        "platforms;android-36" \
+        "build-tools;36.0.0"
+
+# 3. Tell Flutter where the SDK lives.
+RUN flutter config --android-sdk ${ANDROID_HOME} --no-enable-web
+
+RUN echo "-> Before the thing: $(ls /tmp)"
+RUN bun install -pg @oh-my-pi/pi-coding-agent
+RUN bun install -pg @mariozechner/pi-coding-agent@0.70.5
+RUN bun install -pg opencode-ai
+RUN echo "-> After: $(ls /tmp)"
+
+COPY --chown=coder:coder bashrc /home/coder/.bashrc
 
 COPY entrypoint.sh /usr/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/bin/entrypoint.sh"]
+
+USER root
+RUN apt update && apt install -y poppler-utils
