@@ -5,8 +5,13 @@ FROM debian:13-slim
 ARG ASDF_VERSION=0.18.1
 ARG RUBY_VERSION=3.4.9
 ARG PYTHON_VERSION=3.14.4
+
 # Check https://developer.android.com/studio#command-line-tools-only for newer versions
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
+
+ARG PI_VERSION=latest
+ARG OPENCODE_VERSION=latest
+ARG OHMYPI_VERSION=latest
 
 # Install dependencies
 RUN apt-get update && \
@@ -43,6 +48,7 @@ RUN apt-get update && \
     netcat-openbsd \
     ninja-build \
     pkg-config \
+    poppler-utils \
     ripgrep \
     ssh \
     unzip \
@@ -59,7 +65,12 @@ RUN cd /tmp && \
     mv asdf /usr/bin
 
 # Create non-root user
-RUN useradd -s /usr/bin/bash -m coder
+RUN useradd -s /usr/bin/bash -m coder && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends sudo && \
+    echo 'coder ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/coder && \
+    chmod 0440 /etc/sudoers.d/coder && \
+    rm -rf /var/lib/apt/lists/*
 
 USER coder
 WORKDIR /home/coder
@@ -126,17 +137,13 @@ RUN yes | sdkmanager --licenses && \
 # 3. Tell Flutter where the SDK lives.
 RUN flutter config --android-sdk ${ANDROID_HOME} --no-enable-web
 
-RUN echo "-> Before the thing: $(ls /tmp)"
-RUN bun install -pg @oh-my-pi/pi-coding-agent
-RUN bun install -pg @mariozechner/pi-coding-agent@0.70.5
-RUN bun install -pg opencode-ai
-RUN echo "-> After: $(ls /tmp)"
+RUN bun install -pg @earendil-works/pi-coding-agent@${PI_VERSION}
+RUN bun install -pg @oh-my-pi/pi-coding-agent@${OHMYPI_VERSION}
+RUN bun install -pg opencode-ai@${OPENCODE_VERSION}
+RUN pip install pdf2image
 
 COPY --chown=coder:coder bashrc /home/coder/.bashrc
 
 COPY entrypoint.sh /usr/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/bin/entrypoint.sh"]
-
-USER root
-RUN apt update && apt install -y poppler-utils
